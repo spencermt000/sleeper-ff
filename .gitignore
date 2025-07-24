@@ -1,3 +1,6 @@
 0venv/
 0venv
 /0venv
+3. raw_data/drafts/*.csv
+3. raw_data/info/*.csv
+3. raw_data/matchups/*.csv
