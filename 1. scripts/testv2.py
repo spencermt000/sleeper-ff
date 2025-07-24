@@ -83,6 +83,7 @@ def get_user_leagues(user_id):
 
 def fetch_and_append_league_data(league_id):
     """Fetch league & draft settings, apply filters, append to masters. Return True if passes."""
+    global master_info, master_drafts
     li = safe_get_json(f"https://api.sleeper.app/v1/league/{league_id}")
     time.sleep(REQUEST_PAUSE)
     draft_id = li.get("draft_id") if li else None
