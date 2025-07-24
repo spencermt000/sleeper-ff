@@ -45,7 +45,7 @@ for league_id in looping_league_ids['league_id']:
 
     # write out this league's raw matchups
     df       = pd.DataFrame(all_matchups)
-    out_file = os.path.join(MATCHUPS_DIR, f"{league_id}.csv")
+    out_file = os.path.join(MATCHUPS_DIR, f"matchups_{league_id}.csv")
     df.to_csv(out_file, index=False)
     print(f"  • Wrote {len(df)} rows to {out_file}")
 
