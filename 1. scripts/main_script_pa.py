@@ -52,12 +52,9 @@ master_drafts   = load_master(MASTER_DRAFTS_CSV,  master_drafts_cols)
 master_matchups = load_master(MASTER_MATCHUPS_CSV, master_matchups_cols)
 
 # Ensure league_id columns are string type
-if "league_id" in master_info.columns:
-    master_info["league_id"] = master_info["league_id"].astype(str)
-if "league_id" in master_drafts.columns:
-    master_drafts["league_id"] = master_drafts["league_id"].astype(str)
-if "league_id" in master_matchups.columns:
-    master_matchups["league_id"] = master_matchups["league_id"].astype(str)
+for df in (master_info, master_drafts, master_matchups):
+    if "league_id" in df.columns:
+        df["league_id"] = df["league_id"].astype(str)
 
 # ─── TRACKERS ─────────────────────────────────────────────────────────────────
 visited_leagues = set()
@@ -88,17 +85,17 @@ def safe_get_json(url, params=None):
 def explore_league_for_users(league_id):
     data = safe_get_json(f"https://api.sleeper.app/v1/league/{league_id}/rosters")
     time.sleep(REQUEST_PAUSE)
-    return [r["owner_id"] for r in data or [] if r.get("owner_id")]
+    return [r.get("owner_id") for r in data or [] if r.get("owner_id")]
 
 def get_user_leagues(user_id):
     data = safe_get_json(f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/{SEASON}")
     time.sleep(REQUEST_PAUSE)
-    return [l["league_id"] for l in data or []]
+    return [l.get("league_id") for l in data or []]
 
+# ─── FETCH & APPEND LEAGUE DATA ─────────────────────────────────────────────────
 def fetch_and_append_league_data(league_id):
     global master_info, master_drafts
 
-    # ── fetch league + draft JSON
     li = safe_get_json(f"https://api.sleeper.app/v1/league/{league_id}")
     time.sleep(REQUEST_PAUSE)
     if not li or not (draft_id := li.get("draft_id")):
@@ -109,44 +106,45 @@ def fetch_and_append_league_data(league_id):
     if not ds:
         return False
 
-    # ── apply filters
     teams = int(li["settings"].get("num_teams", 0))
     bn    = ds["settings"].get("slots_bn")
     if teams not in LEAGUE_FILTERS["total_teams"] or bn not in LEAGUE_FILTERS["slots_bn"]:
         out_of_filter.add(league_id)
         return False
 
-    # ── INFO
+    # Info
     info_df = pd.concat([
         pd.DataFrame([li.get("scoring_settings", {})]),
         pd.DataFrame([{"roster_positions": li.get("roster_positions", [])}]),
         pd.DataFrame([li.get("settings", {})]),
     ], axis=1)
     info_df["league_id"] = league_id
+    info_df["league_id"] = info_df["league_id"].astype(str)
 
-    if league_id not in master_info["league_id"].astype(str).values:
+    if league_id not in master_info["league_id"].values:
         master_info = pd.concat([master_info, info_df], ignore_index=True)
         master_info.to_csv(MASTER_INFO_CSV, index=False)
 
-    # ── DRAFT
+    # Draft
     raw_picks = ds.get("picks") or safe_get_json(f"https://api.sleeper.app/v1/draft/{draft_id}/picks")
     picks = []
     for p in raw_picks or []:
         m = p.get("metadata", {})
         picks.append({
-            "league_id":  league_id,
-            "draft_id":   draft_id,
-            "draft_slot": p["draft_slot"],
-            "pick_no":    p["pick_no"],
-            "is_keeper":  p["is_keeper"],
-            "player_id":  m.get("player_id"),
-            "position":   m.get("position"),
-            "picked_by":  p.get("picked_by")
+            "league_id":    league_id,
+            "draft_id":     draft_id,
+            "draft_slot":   p.get("draft_slot"),
+            "pick_no":      p.get("pick_no"),
+            "is_keeper":    p.get("is_keeper"),
+            "player_id":    m.get("player_id"),
+            "position":     m.get("position"),
+            "picked_by":    p.get("picked_by"),
         })
     draft_df = pd.DataFrame(picks)
+    # Ensure league_id exists even if picks list was empty
+    draft_df["league_id"] = league_id
     draft_df["league_id"] = draft_df["league_id"].astype(str)
 
-    # append new rows and dedupe by key
     combined = pd.concat([master_drafts, draft_df], ignore_index=True)
     combined.drop_duplicates(subset=["league_id","pick_no"], keep="first", inplace=True)
     master_drafts = combined
@@ -154,6 +152,7 @@ def fetch_and_append_league_data(league_id):
 
     return True
 
+# ─── FETCH & APPEND MATCHUPS ───────────────────────────────────────────────────
 def fetch_and_append_matchups(league_id):
     global master_matchups, already_done
 
@@ -196,14 +195,14 @@ while depth <= MAX_DEPTH:
     attempts += 1
     if lid in visited_leagues:
         continue
+    if lid in already_done:
+        continue
     visited_leagues.add(lid)
 
-    # spider rosters
     for owner in explore_league_for_users(lid):
         if owner not in visited_users:
             user_queue.append(owner)
 
-    # fetch & filter
     passed = fetch_and_append_league_data(lid)
     if passed and lid not in already_done:
         successes += 1
@@ -215,7 +214,7 @@ while depth <= MAX_DEPTH:
     print(f"[{successes}/{attempts}] {status} League {lid}")
 
 # ─── WRAP UP ─────────────────────────────────────────────────────────────────
-pd.DataFrame({"league_id": sorted(out_of_filter)})\
+pd.DataFrame({"league_id": sorted(out_of_filter)}) \
   .to_csv(OUT_OF_FILTER_CSV, index=False)
 
 print(f"\n🎉 Done: {successes}/{attempts} leagues passed filters.")
